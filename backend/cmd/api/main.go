@@ -12,7 +12,10 @@ import (
 )
 
 func main() {
-	godotenv.Load(".env", "../.env")
+	godotenv.Load(".env")
+	godotenv.Load("../.env")
+	godotenv.Load("../../.env")
+	godotenv.Load("../../../.env")
 
 	dbDSN := os.Getenv("DB_DSN")
 	if dbDSN == "" {
@@ -50,6 +53,8 @@ func main() {
 	{
 		api.POST("/transactions", restHandler.CreateTransaction)
 		api.GET("/transactions", restHandler.GetTransactions)
+		api.GET("/products", restHandler.GetProducts)
+		api.POST("/products", restHandler.CreateProduct)
 	}
 
 	port := os.Getenv("PORT")

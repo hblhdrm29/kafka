@@ -26,12 +26,18 @@ export function useWebSocket(url: string, onMessage: (tx: Transaction) => void) 
       socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          if (data.id) {
-            const tx: Transaction = data
-            toast.success(`Transaction ${tx.status}`, {
-              description: `Tx: ${tx.id.split('-')[0]} | Amount: $${tx.amount.toFixed(2)}`,
+          // Broadcast to callback
+          onMessageRef.current(data)
+
+          // Show generic toast for status updates if applicable
+          if (data.status) {
+            toast.success(`Update: ${data.status}`, {
+              description: data.id ? `ID: ${data.id.split('-')[0]}` : '',
             })
-            onMessageRef.current(tx)
+          } else if (data.type === 'PRODUCT_CREATED') {
+             toast.info(`New Product: ${data.name}`, {
+              description: `Price: Rp ${data.price.toLocaleString('id-ID')}`,
+            })
           }
         } catch (error) {
           console.error('Failed to parse WebSocket message', error)

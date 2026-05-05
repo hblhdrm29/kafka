@@ -2,18 +2,23 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
 	"github.com/joho/godotenv"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/user/transaction-system/internal/database"
 	"github.com/user/transaction-system/internal/kafka"
 	"github.com/user/transaction-system/internal/repository"
 )
 
 func main() {
-	godotenv.Load(".env", "../.env")
+	godotenv.Load(".env")
+	godotenv.Load("../.env")
+	godotenv.Load("../../.env")
+	godotenv.Load("../../../.env")
 
 	dbDSN := os.Getenv("DB_DSN")
 	if dbDSN == "" {
@@ -35,11 +40,54 @@ func main() {
 	producer := kafka.NewProducer([]string{kafkaBroker}, "transaction-events")
 	defer producer.Close()
 
-	log.Println("Outbox worker started...")
+	// Connect to RabbitMQ for bidirectional sync
+	rmqUser := os.Getenv("RABBITMQ_USER")
+	rmqPass := os.Getenv("RABBITMQ_PASS")
+	rmqHost := os.Getenv("RABBITMQ_HOST")
+	rmqPort := os.Getenv("RABBITMQ_PORT")
+	if rmqUser == "" {
+		rmqUser = "guest"
+	}
+	if rmqPass == "" {
+		rmqPass = "guest"
+	}
+	if rmqHost == "" {
+		rmqHost = "127.0.0.1"
+	}
+	if rmqPort == "" {
+		rmqPort = "5672"
+	}
+
+	rmqURL := fmt.Sprintf("amqp://%s:%s@%s:%s/", rmqUser, rmqPass, rmqHost, rmqPort)
+	var rmqConn *amqp.Connection
+	for i := 0; i < 10; i++ {
+		rmqConn, err = amqp.Dial(rmqURL)
+		if err == nil {
+			break
+		}
+		log.Println("Waiting for RabbitMQ...")
+		time.Sleep(2 * time.Second)
+	}
+	if err != nil {
+		log.Printf("Warning: Could not connect to RabbitMQ: %v (Kafka-only mode)", err)
+	}
+
+	var rmqCh *amqp.Channel
+	if rmqConn != nil {
+		defer rmqConn.Close()
+		rmqCh, err = rmqConn.Channel()
+		if err != nil {
+			log.Printf("Warning: Could not open RabbitMQ channel: %v", err)
+		} else {
+			defer rmqCh.Close()
+			rmqCh.ExchangeDeclare("transaction_exchange", "fanout", true, false, false, false, nil)
+		}
+	}
+
+	log.Println("Outbox worker started (Kafka + RabbitMQ)...")
 
 	ctx := context.Background()
 	for {
-		// Poll for pending events
 		events, err := repo.FetchPendingOutboxEvents(ctx, 50)
 		if err != nil {
 			log.Printf("Error fetching outbox events: %v", err)
@@ -48,20 +96,29 @@ func main() {
 		}
 
 		for _, event := range events {
-			// Publish to Kafka
+			// 1. Publish to Kafka
 			err := producer.PublishMessage(ctx, event.AggregateID, event.Payload)
 			if err != nil {
-				log.Printf("Failed to publish event %s: %v", event.ID, err)
+				log.Printf("Failed to publish to Kafka %s: %v", event.ID, err)
 				continue
+			}
+
+			// 2. Publish to RabbitMQ (for Web 1 & Web 2)
+			if rmqCh != nil {
+				rmqCh.Publish("transaction_exchange", "", false, false, amqp.Publishing{
+					ContentType: "application/json",
+					Body:        []byte(event.Payload),
+					Type:        "TRANSACTION_CREATED",
+				})
+				log.Printf("Published event %s to Kafka + RabbitMQ", event.ID)
+			} else {
+				log.Printf("Published event %s to Kafka only", event.ID)
 			}
 
 			// Mark as processed
 			err = repo.MarkOutboxEventProcessed(ctx, event.ID)
 			if err != nil {
 				log.Printf("Failed to mark event %s as processed: %v", event.ID, err)
-				// It will be picked up again if we don't mark it, leading to at-least-once delivery (which is fine, Kafka consumer should handle idempotency if needed).
-			} else {
-				log.Printf("Successfully processed event %s for transaction %s", event.ID, event.AggregateID)
 			}
 		}
 

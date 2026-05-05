@@ -91,7 +91,13 @@ export function TransactionTable({ transactions, loading }: TransactionTableProp
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right text-xs text-muted-foreground">
-                  {new Date(tx.created_at).toLocaleString()}
+                  {(() => {
+                    const dateStr = tx.created_at.includes(' ') && !tx.created_at.includes('T') 
+                      ? tx.created_at.replace(' ', 'T') 
+                      : tx.created_at;
+                    const date = new Date(dateStr);
+                    return isNaN(date.getTime()) ? tx.created_at : date.toLocaleString();
+                  })()}
                 </TableCell>
               </TableRow>
             ))

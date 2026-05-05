@@ -16,6 +16,19 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  server: {
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8088',
+        changeOrigin: true
+      },
+      '/ws': {
+        target: 'ws://localhost:8098',
+        ws: true
+      }
+    }
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

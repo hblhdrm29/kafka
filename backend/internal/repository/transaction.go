@@ -10,11 +10,19 @@ import (
 )
 
 type Transaction struct {
-	ID          string    `json:"id"`
-	Amount      float64   `json:"amount"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string  `json:"id"`
+	Amount      float64 `json:"amount"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+type Product struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Price     float64 `json:"price"`
+	Stock     int     `json:"stock"`
+	CreatedAt string  `json:"created_at"`
 }
 
 type OutboxEvent struct {
@@ -49,7 +57,7 @@ func (r *TransactionRepository) CreateTransaction(ctx context.Context, amount fl
 		Amount:      amount,
 		Description: description,
 		Status:      "PENDING",
-		CreatedAt:   time.Now(),
+		CreatedAt:   time.Now().Format(time.RFC3339),
 	}
 
 	_, err = tx.ExecContext(ctx,
@@ -121,6 +129,24 @@ func (r *TransactionRepository) UpdateTransactionStatus(ctx context.Context, id 
 	return err
 }
 
+// SyncTransaction inserts a transaction if it doesn't exist
+func (r *TransactionRepository) SyncTransaction(ctx context.Context, t Transaction) error {
+	_, err := r.DB.ExecContext(ctx, 
+		"INSERT IGNORE INTO transactions (id, amount, description, status, created_at) VALUES (?, ?, ?, ?, ?)",
+		t.ID, t.Amount, t.Description, t.Status, t.CreatedAt,
+	)
+	return err
+}
+
+// SyncProduct inserts a product if it doesn't exist
+func (r *TransactionRepository) SyncProduct(ctx context.Context, p Product) error {
+	_, err := r.DB.ExecContext(ctx, 
+		"INSERT IGNORE INTO products (id, name, price, stock, created_at) VALUES (?, ?, ?, ?, ?)",
+		p.ID, p.Name, p.Price, p.Stock, p.CreatedAt,
+	)
+	return err
+}
+
 func (r *TransactionRepository) GetTransactions(ctx context.Context) ([]Transaction, error) {
 	rows, err := r.DB.QueryContext(ctx, "SELECT id, amount, description, status, created_at FROM transactions ORDER BY created_at DESC")
 	if err != nil {
@@ -137,4 +163,42 @@ func (r *TransactionRepository) GetTransactions(ctx context.Context) ([]Transact
 		transactions = append(transactions, t)
 	}
 	return transactions, nil
+}
+
+func (r *TransactionRepository) CreateProduct(ctx context.Context, name string, price float64, stock int) (*Product, error) {
+	product := &Product{
+		ID:        uuid.New().String(),
+		Name:      name,
+		Price:     price,
+		Stock:     stock,
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+
+	_, err := r.DB.ExecContext(ctx,
+		"INSERT INTO products (id, name, price, stock, created_at) VALUES (?, ?, ?, ?, ?)",
+		product.ID, product.Name, product.Price, product.Stock, product.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return product, nil
+}
+
+func (r *TransactionRepository) GetProducts(ctx context.Context) ([]Product, error) {
+	rows, err := r.DB.QueryContext(ctx, "SELECT id, name, price, stock, created_at FROM products ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var products []Product
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.Stock, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		products = append(products, p)
+	}
+	return products, nil
 }

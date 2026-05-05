@@ -12,7 +12,10 @@ import (
 )
 
 func main() {
-	godotenv.Load(".env", "../.env")
+	godotenv.Load(".env")
+	godotenv.Load("../.env")
+	godotenv.Load("../../.env")
+	godotenv.Load("../../../.env")
 
 	kafkaBroker := os.Getenv("KAFKA_BROKER")
 	if kafkaBroker == "" {
